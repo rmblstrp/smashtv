@@ -44,6 +44,8 @@ public static class Tuning
     public const float WalkOutDown = 0xA3 / SourceFps;           // BOTDOOR script -> 2.98 s
     public const float WalkOutUp = 0xAA / SourceFps;             // TOPDOOR script -> 3.11 s
     public const float RoomFreeze = 120f / SourceFps;            // enemies frozen at room start, ROBO.ASM:1295
+    public const float BannerAfterScroll = 1.5f;                 // measured in arcade footage, both transitions
+    public const float BannerColorStep = 0.1f;                   // footage: a new colour at least every 0.2 s
     public const int RoomKillQuota = 15;                         // demo only: the arcade ends a room when its primary enemy runs out
 
     public const float GruntSpawnInterval = 18f / SourceFps;     // circuit 1 room 1 RATE 6 x 3 frames

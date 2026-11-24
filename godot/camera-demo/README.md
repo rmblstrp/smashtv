@@ -115,8 +115,7 @@ the open exit (green chevrons). The transition follows the arcade:
   a second and leaves the player near the new room's centre.
 - **Freeze:** enemies start 120 frames after control returns (`ROBO.ASM:1295`).
 
-Each room's floor and painting are tinted so the change reads. A corridor floor fills only the gap
-between paintings; inside a painting the doorway is painted, and 3D floor there would cover the art.
+Each room's floor and painting are tinted so the change reads.
 Paintings pan cleanly because the camera is orthographic and they face it, so there is no parallax.
 
 **Checked against arcade footage** (a 60 fps gameplay video; scroll timed from frame-to-frame change
@@ -130,17 +129,21 @@ in a wall strip, speed from tracking the wall's shift per frame):
 | Player at scroll end | — | about ¼ into the new room, still walking | 4.9–5.4 m off centre |
 | Player when control returns | — | near the floor centre, ~1–1.2 s after the scroll stops | within 0.8 m of centre |
 
-Not yet in the demo, from the same footage:
-- **The gap between rooms is painted** (machinery panels sideways, a grey wall band with doors
-  vertically), not black.
-- **Start-of-room enemies are already standing in the new room during the scroll**, frozen (a grunt
-  formation, fat men), instead of everything arriving through doors afterwards.
-- **A room-title banner** ("COLLECT POWERUPS!", "MEET MR. SHRAPNEL") colour-cycles over the new room
-  while enemies stay frozen.
-- The back wall with its built-in HUD scrolls with the room, as the painted screens here do.
+Also from the footage, and now in the demo:
+- **The gaps between rooms are painted** (`ConnectorPainter`): machinery panels between rooms side
+  by side, a wall band with light pylons between rooms stacked vertically, each with a corridor
+  lined up with the doors.
+- **Start-of-room enemies stand frozen in the new room during the scroll**: a grunt ring (B, A),
+  two fat men and a grunt line (C), a tank and a V of grunts (D). Each formation leaves the path
+  from the entry door to the centre clear.
+- **A room-title banner colour-cycles over the new room** and scrolls in with it. It clears 1.5 s
+  after the scroll stops (measured in both clips); enemies stay frozen 120 frames more, then the
+  room starts.
+- **The screen is exactly one room.** Black bars mask anything a wider window would show past the
+  room painting, so neighbouring art only appears as the scroll brings it in.
 
 `docs/transition-sideways.png` and `docs/transition-down.png` are contact sheets (0.4 s apart) of
-A → B and B → C; `docs/rooms.mp4` is 45 s of the full loop on autopilot (`--quota=8`). The log
+A → B and B → C; `docs/rooms.mp4` is 55 s of the loop on autopilot (`--quota=8`). The log
 prints `ROOMS` lines with timings, e.g. entering B at (0.0, −0.3) m from its centre.
 
 ## Comparison

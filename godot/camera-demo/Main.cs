@@ -185,6 +185,7 @@ public partial class Main : Node3D
                       + (p.StretchFloor ? $", depth stretch ×{stretch:0.000}" : "")
                       + (p.ActorTilt > 0 ? $", characters tipped {p.ActorTilt:0}°" : "");
         _camBase = _cam.Position;
+        UpdateScreenMask(size);
         UpdateCameraPan();
         _title.Text = $"{b.Name}\n{_cameraDesc}";
         _help.Text = _showHelp ? HelpText(b) : "";
@@ -294,7 +295,7 @@ public partial class Main : Node3D
         }
 
         if (RoomsActive) UpdateRooms(dt);
-        if (!RoomsActive || (_phase == Phase.Fighting && _spawnDelay <= 0)) Spawn(dt);
+        if (!RoomsActive || (_phase == Phase.Fighting && !EnemiesFrozen)) Spawn(dt);
         UpdateEnemies(dt);
         UpdateShots(dt);
         UpdateFx(dt);
@@ -360,13 +361,26 @@ public partial class Main : Node3D
         var n = DoorNormal[door];
         var edge = n.X != 0 ? W / 2 : D / 2;
         var tangent = new Vector2(-n.Y, n.X);
-        var a = new Actor
-        {
-            Kind = kind,
-            Inward = -n,
-            Pos = _origin + n * (edge + 1.2f + back) + tangent * sideways,
-            Entering = (2.2f + back) / Tuning.PlayerSpeed,
-        };
+        var a = NewActor(kind);
+        a.Inward = -n;
+        a.Pos = _origin + n * (edge + 1.2f + back) + tangent * sideways;
+        a.Entering = (2.2f + back) / Tuning.PlayerSpeed;
+        a.Node.Position = new Vector3(a.Pos.X, 0, a.Pos.Y);
+    }
+
+    /// <summary>An enemy standing at a floor position, already inside the room (start-of-room placement).</summary>
+    void PlaceEnemy(Kind kind, Vector2 pos, Vector2 facing)
+    {
+        var a = NewActor(kind);
+        a.Pos = pos;
+        a.Node.Position = new Vector3(pos.X, 0, pos.Y);
+        a.Model.Rotation = new Vector3(0, Yaw(facing), 0);
+        a.TurretYaw = Yaw(facing);
+    }
+
+    Actor NewActor(Kind kind)
+    {
+        var a = new Actor { Kind = kind };
         a.Radius = kind switch { Kind.Grunt => Tuning.GruntRadius, Kind.Fat => Tuning.FatRadius, _ => Tuning.TankRadius };
         (a.Node, a.Tilt, a.Blob) = MakeHolder(a.Radius);
         switch (kind)
@@ -384,12 +398,13 @@ public partial class Main : Node3D
                 a.Hp = Tuning.TankTurretDamage; a.Speed = Tuning.TankSpeed; a.FireTimer = 2;
                 break;
         }
-        a.Node.Position = new Vector3(a.Pos.X, 0, a.Pos.Y);
         _enemies.Add(a);
+        return a;
     }
 
     void UpdateEnemies(float dt)
     {
+        if (EnemiesFrozen) return;   // start-of-room freeze: no movement, no contact
         foreach (var a in _enemies)
         {
             if (a.Entering > 0)
@@ -692,12 +707,40 @@ public partial class Main : Node3D
 
     void BuildHud()
     {
-        var layer = new CanvasLayer();
+        // Screen mask for the room loop: the arcade's screen is exactly one room, and neighbouring
+        // art only appears when the scroll brings it into that window. Black bars hide whatever a
+        // wider window shows past the room painting.
+        var mask = new CanvasLayer { Layer = 1 };
+        AddChild(mask);
+        for (int i = 0; i < 4; i++)
+        {
+            _maskBars[i] = new ColorRect { Color = Colors.Black, Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+            mask.AddChild(_maskBars[i]);
+        }
+        var layer = new CanvasLayer { Layer = 2 };
         AddChild(layer);
         _title = Hud(layer, new Vector2(16, 10), 18);
         _help = Hud(layer, new Vector2(16, 64), 13);
         _status = Hud(layer, Vector2.Zero, 14);
         _status.AnchorTop = 1; _status.AnchorBottom = 1; _status.OffsetTop = -34; _status.OffsetLeft = 16;
+    }
+
+    readonly ColorRect[] _maskBars = new ColorRect[4];
+
+    /// <summary>Left/right/top/bottom bars outside the room painting (preset 9 only; camera is orthographic there).</summary>
+    void UpdateScreenMask(Vector2 screen)
+    {
+        bool on = RoomsActive && _cam.Projection == Camera3D.ProjectionType.Orthogonal;
+        foreach (var bar in _maskBars) bar.Visible = on;
+        if (!on) return;
+        float viewH = _cam.Size, viewW = viewH * screen.X / screen.Y;
+        var paint = BackdropPainter.SizeMeters;
+        float bx = Mathf.Max(0, (viewW - paint.X) / 2 / viewW * screen.X);
+        float by = Mathf.Max(0, (viewH - paint.Y) / 2 / viewH * screen.Y);
+        _maskBars[0].Position = Vector2.Zero; _maskBars[0].Size = new Vector2(bx, screen.Y);
+        _maskBars[1].Position = new Vector2(screen.X - bx, 0); _maskBars[1].Size = new Vector2(bx, screen.Y);
+        _maskBars[2].Position = Vector2.Zero; _maskBars[2].Size = new Vector2(screen.X, by);
+        _maskBars[3].Position = new Vector2(0, screen.Y - by); _maskBars[3].Size = new Vector2(screen.X, by);
     }
 
     static Label Hud(CanvasLayer layer, Vector2 pos, int size)
