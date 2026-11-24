@@ -119,6 +119,26 @@ Each room's floor and painting are tinted so the change reads. A corridor floor 
 between paintings; inside a painting the doorway is painted, and 3D floor there would cover the art.
 Paintings pan cleanly because the camera is orthographic and they face it, so there is no parallax.
 
+**Checked against arcade footage** (a 60 fps gameplay video; scroll timed from frame-to-frame change
+in a wall strip, speed from tracking the wall's shift per frame):
+
+| | Source predicts | Footage | Demo |
+|---|---|---|---|
+| Vertical scroll | 111 frames, 2.03 s | 111 moving frames, 2.02 s, every frame the same step | 2.03 s |
+| Horizontal scroll | 157⅓ frames, 2.88 s | 158 moving frames, 2.90 s; last step ≈ 1 px (`STOPX` clamp) | 2.88 s |
+| Easing | none | none — constant 3 px/frame from first frame to last | none |
+| Player at scroll end | — | about ¼ into the new room, still walking | 4.9–5.4 m off centre |
+| Player when control returns | — | near the floor centre, ~1–1.2 s after the scroll stops | within 0.8 m of centre |
+
+Not yet in the demo, from the same footage:
+- **The gap between rooms is painted** (machinery panels sideways, a grey wall band with doors
+  vertically), not black.
+- **Start-of-room enemies are already standing in the new room during the scroll**, frozen (a grunt
+  formation, fat men), instead of everything arriving through doors afterwards.
+- **A room-title banner** ("COLLECT POWERUPS!", "MEET MR. SHRAPNEL") colour-cycles over the new room
+  while enemies stay frozen.
+- The back wall with its built-in HUD scrolls with the room, as the painted screens here do.
+
 `docs/transition-sideways.png` and `docs/transition-down.png` are contact sheets (0.4 s apart) of
 A → B and B → C; `docs/rooms.mp4` is 45 s of the full loop on autopilot (`--quota=8`). The log
 prints `ROOMS` lines with timings, e.g. entering B at (0.0, −0.3) m from its centre.
