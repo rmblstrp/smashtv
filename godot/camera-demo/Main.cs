@@ -36,6 +36,15 @@ public partial class Main : Node3D
         new("8  Literal: straight down + leaned walls + tipped characters", true, 90, 0, false,
             "Plan-view floor, back wall leaned 63°, side walls 27°, characters tipped back 30° to show their fronts. Blob shadows.",
             new Walls(63, 27, 0.5f, 0.4f, 0.55f), ActorTilt: 30),
+        new("9  Painted walls + 3D floor", true, 60, 0, true,
+            "Walls are a 2D painting on a camera-facing quad; the floor stays 3D, so it takes shadows, decals and light.\n" +
+            "A painted front-lip overlay draws over characters. Q/E: the floor stays aligned (the depth stretch keeps it\n" +
+            "square at any pitch), but the characters' angle changes while the painted walls can't, so the two stop matching.",
+            Backdrop: BackdropMode.Walls),
+        new("0  Whole room painted + shadow catcher", true, 60, 0, true,
+            "Walls and floor are one painting. An invisible shadow-catcher plane lays the 3D shadows onto it.\n" +
+            "Floor decals and dynamic light would each need their own trick.",
+            Backdrop: BackdropMode.Room),
     };
 
     enum Kind { Grunt, Fat, Tank }
@@ -57,6 +66,8 @@ public partial class Main : Node3D
     DirectionalLight3D _sun;
     Label _help, _status, _title;
     Walls _walls;
+    BackdropMode _builtMode = BackdropMode.None;
+    MeshInstance3D _bdWalls, _bdRoom, _bdFront;
     readonly List<Actor> _enemies = new();
     readonly List<Shot> _shots = new();
     readonly List<Fx> _fx = new();
@@ -67,7 +78,7 @@ public partial class Main : Node3D
     float _fireTimer, _spawnTimer, _fatTimer, _tankTimer, _hitCooldown, _time, _pitchOffset, _fovOffset, _tilt;
     int _preset = 1, _kills, _hits;
     bool _showFeet, _autopilot, _showHelp = true, _blobs;
-    string _cameraDesc = "";
+    string _cameraDesc = "", _saveBackdropsTo;
 
     public override void _Ready()
     {
@@ -76,11 +87,16 @@ public partial class Main : Node3D
             if (arg == "--autopilot") _autopilot = true;
             else if (arg == "--feet") _showFeet = true;
             else if (arg.StartsWith("--preset=")) _preset = Mathf.Clamp(arg[9..].ToInt() - 1, 0, Presets.Length - 1);
+            else if (arg.StartsWith("--pitch-offset=")) _pitchOffset = arg[15..].ToFloat();
+            else if (arg.StartsWith("--save-backdrops=")) _saveBackdropsTo = arg[17..];
         }
         if (_autopilot) _showHelp = false;
 
         BuildEnvironment();
         BuildHud();
+        _bdWalls = BackdropQuad(floor: false, frontOnly: false);
+        _bdRoom = BackdropQuad(floor: true, frontOnly: false);
+        _bdFront = BackdropQuad(floor: false, frontOnly: true);
         (_player, _playerTilt, _playerBlob) = MakeHolder(Tuning.PlayerRadius);
         (_, _legs, _torso) = Shapes.Player(_playerTilt);
         _hitRing = Shapes.Add(_player, new TorusMesh { InnerRadius = 0.45f, OuterRadius = 0.6f },
@@ -94,6 +110,22 @@ public partial class Main : Node3D
 
         GetViewport().SizeChanged += ApplyCamera;
         ApplyCamera();
+        if (_saveBackdropsTo != null) SaveBackdrops(_saveBackdropsTo);
+    }
+
+    /// <summary>Writes the three paintings as PNGs (templates for an artist), then quits.</summary>
+    async void SaveBackdrops(string dir)
+    {
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        DirAccess.MakeDirRecursiveAbsolute(dir);
+        foreach (var (quad, name) in new[] { (_bdWalls, "walls"), (_bdRoom, "room"), (_bdFront, "front") })
+        {
+            var tex = ((StandardMaterial3D)quad.MaterialOverride).AlbedoTexture;
+            var err = tex.GetImage().SavePng($"{dir}/backdrop-{name}.png");
+            GD.Print($"saved backdrop-{name}.png: {err}");
+        }
+        GetTree().Quit();
     }
 
     // ---------------------------------------------------------------- camera
@@ -103,7 +135,7 @@ public partial class Main : Node3D
         var b = Presets[_preset];
         var p = b with { Pitch = Mathf.Clamp(b.Pitch + _pitchOffset, 20, 90), Fov = Mathf.Clamp(b.Fov + _fovOffset, 10, 90) };
         var walls = p.Walls ?? Upright;
-        if (walls != _walls) BuildArena(walls);
+        if (walls != _walls || p.Backdrop != _builtMode) BuildArena(walls, p.Backdrop);
 
         float stretch = p.StretchFloor ? 1f / Mathf.Sin(Mathf.DegToRad(p.Pitch)) : 1f;
         _world.Scale = new Vector3(1, 1, stretch);
@@ -116,12 +148,35 @@ public partial class Main : Node3D
         foreach (var s in _shots) SetTilt(s.Tilt, null);
         foreach (var f in _fx) SetTilt(f.Tilt, null);
 
-        var (x, zn, zs) = ArenaExtent(walls);
         var corners = new List<Vector3>();
-        foreach (float cx in new[] { -x, x })
-            foreach (float cz in new[] { zn * stretch, zs * stretch })
-                foreach (float cy in new[] { 0f, H })
-                    corners.Add(new Vector3(cx, cy, cz));
+        float pr = Mathf.DegToRad(p.Pitch);
+        var forward = new Vector3(0, -Mathf.Sin(pr), -Mathf.Cos(pr));
+        var up = new Vector3(0, Mathf.Cos(pr), -Mathf.Sin(pr));
+        if (p.Backdrop == BackdropMode.None)
+        {
+            var (x, zn, zs) = ArenaExtent(walls);
+            foreach (float cx in new[] { -x, x })
+                foreach (float cz in new[] { zn * stretch, zs * stretch })
+                    foreach (float cy in new[] { 0f, H })
+                        corners.Add(new Vector3(cx, cy, cz));
+        }
+        else
+        {
+            // Frame the painting, which lives in screen metres on the camera plane.
+            foreach (float bx in new[] { BackdropPainter.MinX, BackdropPainter.MaxX })
+                foreach (float bv in new[] { BackdropPainter.MinV, BackdropPainter.MaxV })
+                    corners.Add(Vector3.Right * bx + up * bv);
+        }
+        // The painting is screen-aligned at whatever pitch is current, as a painting would be:
+        // the floor and characters re-angle under Q/E, the picture can't, so they slide apart.
+        var c = BackdropPainter.CenterMeters;
+        var basis = new Basis(Vector3.Right, up, -forward);
+        _bdWalls.Transform = new Transform3D(basis, Vector3.Right * c.X + up * c.Y + forward * 40f);
+        _bdRoom.Transform = _bdWalls.Transform;
+        _bdFront.Transform = new Transform3D(basis, Vector3.Right * c.X + up * c.Y - forward * 40f);
+        _bdWalls.Visible = p.Backdrop == BackdropMode.Walls;
+        _bdRoom.Visible = p.Backdrop == BackdropMode.Room;
+        _bdFront.Visible = p.Backdrop != BackdropMode.None;
         var size = GetViewport().GetVisibleRect().Size;
         _cameraDesc = CameraFit.Apply(_cam, p, size.X / size.Y, corners.ToArray())
                       + (p.StretchFloor ? $", depth stretch ×{stretch:0.000}" : "")
@@ -147,7 +202,7 @@ public partial class Main : Node3D
     static string HelpText(CameraPreset p) =>
         p.Note + "\n\n" +
         "WASD / left stick: move     Arrows / right stick: shoot\n" +
-        "1–8: camera preset     Q / E: pitch −/+5°     Z / X: FOV −/+5° (perspective)\n" +
+        "1–9, 0: camera preset     Q / E: pitch −/+5°     Z / X: FOV −/+5° (perspective)\n" +
         "F: show collision footprints     R: reset enemies     H: hide this text";
 
     // ---------------------------------------------------------------- input
@@ -157,8 +212,10 @@ public partial class Main : Node3D
         if (e is not InputEventKey { Pressed: true, Echo: false } k) return;
         switch (k.Keycode)
         {
-            case >= Key.Key1 and <= Key.Key8:
+            case >= Key.Key1 and <= Key.Key9:
                 _preset = (int)(k.Keycode - Key.Key1); _pitchOffset = 0; _fovOffset = 0; break;
+            case Key.Key0:
+                _preset = 9; _pitchOffset = 0; _fovOffset = 0; break;
             case Key.Q: _pitchOffset -= 5; break;
             case Key.E: _pitchOffset += 5; break;
             case Key.Z: _fovOffset -= 5; break;
@@ -493,12 +550,36 @@ public partial class Main : Node3D
     /// extended to meet the leaned neighbours; where the slabs cross, the corner seams come out
     /// diagonal, like the arcade art.
     /// </summary>
-    void BuildArena(Walls w)
+    void BuildArena(Walls w, BackdropMode mode)
     {
         _arena?.QueueFree();
         _arena = new Node3D { Name = "Arena" };
         _world.AddChild(_arena);
         _walls = w;
+        _builtMode = mode;
+
+        if (mode == BackdropMode.Room)
+        {
+            // Painted floor: an invisible plane that only shows the shadows falling on it.
+            // Not render_mode shadow_to_opacity: that clamps alpha by ambient × albedo
+            // (scene_forward_clustered.glsl), so a black shadow comes out fully transparent.
+            // Instead the light pass writes alpha = how much of the sun is blocked.
+            var catcher = new ShaderMaterial
+            {
+                Shader = new Shader
+                {
+                    Code = """
+                        shader_type spatial;
+                        render_mode blend_mix, depth_draw_never, specular_disabled, ambient_light_disabled;
+                        uniform float strength = 0.55;
+                        void fragment() { ALBEDO = vec3(0.0); ALPHA = 0.0; }
+                        void light() { if (LIGHT_IS_DIRECTIONAL) { ALPHA = (1.0 - ATTENUATION) * strength; } }
+                        """,
+                },
+            };
+            Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W, D) }, catcher, new Vector3(0, 0.005f, 0));
+            return;
+        }
 
         var floorMat = new StandardMaterial3D
         {
@@ -507,12 +588,14 @@ public partial class Main : Node3D
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
         };
         Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W, D) }, floorMat, Vector3.Zero);
-        Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W + 16, D + 16) },
-            Shapes.Mat(new Color(0.1f, 0.09f, 0.08f)), new Vector3(0, -0.02f, 0));
         // A circle on the floor: it turns into an ellipse wherever the floor is foreshortened.
         var ring = Shapes.Add(_arena, new TorusMesh { InnerRadius = 2.6f, OuterRadius = 3.0f },
             Shapes.Mat(new Color(0.6f, 0.12f, 0.1f)), new Vector3(0, 0.01f, 0));
         ring.Scale = new Vector3(1, 0.05f, 1);
+        if (mode == BackdropMode.Walls) return;   // walls come from the painting
+
+        Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W + 16, D + 16) },
+            Shapes.Mat(new Color(0.1f, 0.09f, 0.08f)), new Vector3(0, -0.02f, 0));
 
         var wall = new Color(0.78f, 0.68f, 0.48f);
         var trim = new Color(0.55f, 0.45f, 0.3f);
@@ -559,6 +642,40 @@ public partial class Main : Node3D
             Shapes.Box(_arena, new Vector3(sLen, hs, ts), wall, new Vector3(cx, hs / 2, D / 2 + ts / 2));
             Shapes.Box(_arena, new Vector3(0.3f, hs + 0.2f, ts + 0.2f), post, new Vector3(s * gap / 2, (hs + 0.2f) / 2, D / 2 + ts / 2));
         }
+    }
+
+    /// <summary>
+    /// A painting rendered once into a transparent SubViewport and shown unshaded on a quad that
+    /// faces the camera. Lives outside the depth-stretched world so it is never distorted.
+    /// </summary>
+    MeshInstance3D BackdropQuad(bool floor, bool frontOnly)
+    {
+        var vp = new SubViewport
+        {
+            Size = BackdropPainter.PixelSize,
+            TransparentBg = true,
+            Disable3D = true,
+            Msaa2D = Viewport.Msaa.Msaa4X,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Once,
+        };
+        vp.AddChild(new BackdropPainter { PaintFloor = floor, FrontOnly = frontOnly });
+        AddChild(vp);
+        var mat = new StandardMaterial3D
+        {
+            AlbedoTexture = vp.GetTexture(),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+        };
+        var quad = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = BackdropPainter.SizeMeters },
+            MaterialOverride = mat,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Visible = false,
+        };
+        AddChild(quad);
+        return quad;
     }
 
     void BuildHud()

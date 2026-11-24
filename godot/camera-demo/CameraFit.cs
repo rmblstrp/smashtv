@@ -8,8 +8,11 @@ namespace CameraDemo;
 /// </summary>
 public record Walls(float NorthLean, float SideLean, float SouthHeight, float Thickness, float SouthThickness);
 
+/// <summary>None: 3D walls. Walls: painted walls, 3D floor shows through. Room: walls and floor painted.</summary>
+public enum BackdropMode { None, Walls, Room }
+
 public record CameraPreset(string Name, bool Ortho, float Pitch, float Fov, bool StretchFloor, string Note,
-                           Walls Walls = null, float ActorTilt = 0);
+                           Walls Walls = null, float ActorTilt = 0, BackdropMode Backdrop = BackdropMode.None);
 
 /// <summary>
 /// Places a fixed camera so the whole arena (walls included) fills the screen, like the

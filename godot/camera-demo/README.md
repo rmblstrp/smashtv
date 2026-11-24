@@ -16,7 +16,7 @@ Open `project.godot` in Godot 4.7 (.NET build) and press Play, or:
 |---|---|
 | WASD / left stick | move |
 | Arrow keys / right stick | shoot (twin-stick) |
-| 1–8 | camera preset |
+| 1–9, 0 | camera preset (0 = preset 10) |
 | Q / E | pitch −/+ 5° |
 | Z / X | FOV −/+ 5° (perspective presets) |
 | F | show collision footprints (the circle gameplay actually uses) |
@@ -35,6 +35,8 @@ Open `project.godot` in Godot 4.7 (.NET build) and press Play, or:
 | 6 | Perspective 50°, 50° vertical FOV | wide lens: near side looms, far side shrinks |
 | 7 | Hybrid: preset 4 + leaned walls | back wall leaned 27°, side walls 27°, front wall a 0.5 m curb; characters upright under real light |
 | 8 | Literal: straight down + leaned walls + tipped characters | plan-view floor, back wall leaned 63°, characters tipped back 30°, blob shadows |
+| 9 | Painted walls + 3D floor | walls are a 2D painting on a camera-facing quad, floor stays 3D; a painted front-lip overlay draws over characters |
+| 0 | Whole room painted + shadow catcher | walls and floor are one painting; an invisible plane lays the 3D shadows onto it |
 
 Every preset re-fits the camera so the whole arena, walls included, fills the screen — a fixed
 single-screen view like the arcade. Shots travel at gun height while collision uses the floor
@@ -45,7 +47,8 @@ Speeds and counts come from `docs/gameplay-reference.md`, converted at 1 m = 17 
 
 ## Unattended renders
 
-`-- --autopilot --preset=N` makes the player fly a fixed figure-eight and shoot the nearest enemy
+Launch options after `--`: `--preset=N`, `--autopilot`, `--feet`, `--pitch-offset=DEG`,
+`--save-backdrops=DIR`. `--autopilot --preset=N` makes the player fly a fixed figure-eight and shoot the nearest enemy
 with a fixed random seed, so clips of different presets show the same fight:
 
 ```bash
@@ -71,6 +74,32 @@ on-screen depth, side-wall faces ≈ 6.7% of its width, front lip ≈ 0.55 m.
 
 `docs/leaned-walls.png` shows the same frame through 7 (left) and 8 (right). Room geometry lives
 in `Main.BuildArena`, the angles in the `Walls` records in `Main.Presets`.
+
+## Painted backdrops (presets 9 and 0)
+
+With a fixed camera the room never needs to be seen from another angle, so it can be a picture.
+`BackdropPainter` draws it in code, in "screen metres", into a transparent SubViewport shown on a
+quad facing the camera. With the 60° orthographic camera and depth stretch, the 3D floor maps to an
+exact rectangle on screen, so characters stand on the painted floor with no fitting.
+
+- **Layers:** the back painting sits far behind everything; a front painting (the near lip only)
+  sits in front of everything, so characters walking past the near wall go behind it. Back-wall
+  doorways need no special case: characters are always in front of the back wall.
+- **Painted walls, 3D floor (9) vs. whole room painted (0):** they look the same
+  (`docs/backdrop-presets.png`: 7, 9, 0). The floor matters for what lands on it: in 9 the floor is
+  real, so shadows, decals (blood, scorch) and dynamic light just work. In 0 shadows need the
+  catcher plane (`docs/shadows-3d-vs-painted.png`); decals and lights from explosions would each
+  need their own trick.
+- **Shadow catcher:** not `render_mode shadow_to_opacity` — that clamps alpha by ambient × albedo
+  (`scene_forward_clustered.glsl`), so black shadows come out invisible. The shader's `light()`
+  writes `ALPHA = (1 - ATTENUATION) * strength` instead.
+- **The limit:** the depth stretch keeps the floor aligned at any pitch, but the painted walls are
+  drawn for 60°. At another pitch the characters' angle changes and the walls' doesn't
+  (`docs/painting-at-other-pitch.png`, 60° vs 45°). Fine for a fixed camera; zoom and pan also work
+  (orthographic), tilt and rotate don't.
+- **Templates:** `docs/backdrops/backdrop-{walls,room,front}.png` are the paintings at 64 px/m, with
+  the floor transparent in `walls`. An artist can paint over them at the same size and drop them in.
+  Regenerate with `-- --save-backdrops=/abs/dir`.
 
 ## Comparison
 
