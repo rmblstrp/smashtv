@@ -36,6 +36,16 @@ public static class Tuning
     public static readonly float CannonballSpeed = Mps(1.6f);    // TANK.ASM:1534 -> 5.1 m/s
     public const float TankRadius = 1.0f;
 
+    // Room to room. Rooms sit on a grid; leaving one scrolls the screen to the next.
+    public static readonly float ScrollSpeed = Mps(3f);          // SCRLXSPD/SCRLYSPD [3,0], WAVES.ASM:175 -> 9.65 m/s, linear
+    public const float RoomStepX = 472f / PxPerMeter;            // CRCT1YX x step 0x1D8 px -> 27.8 m
+    public const float RoomStepZ = 333f / PxPerMeter;            // CRCT1YX y step 0x152-5 px -> 19.6 m
+    public const float WalkOutSide = 0xDF / SourceFps;           // RGTDOOR/LFTDOOR script, ROBOATT.ASM:2222 -> 4.08 s
+    public const float WalkOutDown = 0xA3 / SourceFps;           // BOTDOOR script -> 2.98 s
+    public const float WalkOutUp = 0xAA / SourceFps;             // TOPDOOR script -> 3.11 s
+    public const float RoomFreeze = 120f / SourceFps;            // enemies frozen at room start, ROBO.ASM:1295
+    public const int RoomKillQuota = 15;                         // demo only: the arcade ends a room when its primary enemy runs out
+
     public const float GruntSpawnInterval = 18f / SourceFps;     // circuit 1 room 1 RATE 6 x 3 frames
     public const int MaxGrunts = 22;
     public const float GangChance = 0.14f;                       // RANDPER 140

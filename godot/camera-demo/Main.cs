@@ -89,6 +89,7 @@ public partial class Main : Node3D
             else if (arg.StartsWith("--preset=")) _preset = Mathf.Clamp(arg[9..].ToInt() - 1, 0, Presets.Length - 1);
             else if (arg.StartsWith("--pitch-offset=")) _pitchOffset = arg[15..].ToFloat();
             else if (arg.StartsWith("--save-backdrops=")) _saveBackdropsTo = arg[17..];
+            else if (arg.StartsWith("--quota=")) _quota = arg[8..].ToInt();
         }
         if (_autopilot) _showHelp = false;
 
@@ -134,6 +135,7 @@ public partial class Main : Node3D
     {
         var b = Presets[_preset];
         var p = b with { Pitch = Mathf.Clamp(b.Pitch + _pitchOffset, 20, 90), Fov = Mathf.Clamp(b.Fov + _fovOffset, 10, 90) };
+        if (!RoomsActive && (_room != 0 || _phase != Phase.Fighting)) ResetRooms();   // rooms exist in preset 9 only
         var walls = p.Walls ?? Upright;
         if (walls != _walls || p.Backdrop != _builtMode) BuildArena(walls, p.Backdrop);
 
@@ -171,16 +173,19 @@ public partial class Main : Node3D
         // the floor and characters re-angle under Q/E, the picture can't, so they slide apart.
         var c = BackdropPainter.CenterMeters;
         var basis = new Basis(Vector3.Right, up, -forward);
-        _bdWalls.Transform = new Transform3D(basis, Vector3.Right * c.X + up * c.Y + forward * 40f);
-        _bdRoom.Transform = _bdWalls.Transform;
+        _bdRoom.Transform = new Transform3D(basis, Vector3.Right * c.X + up * c.Y + forward * 40f);
         _bdFront.Transform = new Transform3D(basis, Vector3.Right * c.X + up * c.Y - forward * 40f);
-        _bdWalls.Visible = p.Backdrop == BackdropMode.Walls;
+        _bdWalls.Visible = false;   // texture source for the per-room paintings of preset 9
         _bdRoom.Visible = p.Backdrop == BackdropMode.Room;
-        _bdFront.Visible = p.Backdrop != BackdropMode.None;
+        _bdFront.Visible = p.Backdrop == BackdropMode.Room;
+        _stretch = stretch;
+        PlaceRoomQuads(basis, up, forward, RoomsActive);
         var size = GetViewport().GetVisibleRect().Size;
         _cameraDesc = CameraFit.Apply(_cam, p, size.X / size.Y, corners.ToArray())
                       + (p.StretchFloor ? $", depth stretch ×{stretch:0.000}" : "")
                       + (p.ActorTilt > 0 ? $", characters tipped {p.ActorTilt:0}°" : "");
+        _camBase = _cam.Position;
+        UpdateCameraPan();
         _title.Text = $"{b.Name}\n{_cameraDesc}";
         _help.Text = _showHelp ? HelpText(b) : "";
     }
@@ -203,7 +208,8 @@ public partial class Main : Node3D
         p.Note + "\n\n" +
         "WASD / left stick: move     Arrows / right stick: shoot\n" +
         "1–9, 0: camera preset     Q / E: pitch −/+5°     Z / X: FOV −/+5° (perspective)\n" +
-        "F: show collision footprints     R: reset enemies     H: hide this text";
+        "F: show collision footprints     R: reset enemies     H: hide this text" +
+        (p.Backdrop == BackdropMode.Walls ? "\nRooms: clear the room (or press K), then walk into the open exit" : "");
 
     // ---------------------------------------------------------------- input
 
@@ -229,6 +235,7 @@ public partial class Main : Node3D
                 foreach (var a in _enemies) a.Node.QueueFree();
                 _enemies.Clear(); break;
             case Key.H: _showHelp = !_showHelp; break;
+            case Key.K: ClearRoom(); break;
             default: return;
         }
         ApplyCamera();
@@ -253,7 +260,8 @@ public partial class Main : Node3D
     /// <summary>Scripted player for unattended renders: a slow figure-eight, shooting the nearest enemy.</summary>
     (Vector2, Vector2) Autopilot()
     {
-        var target = new Vector2(6.5f * Mathf.Sin(0.35f * _time), 3.2f * Mathf.Sin(0.7f * _time + 1f));
+        if (RoomsActive && _phase == Phase.Cleared) return (AutopilotToExit(), Vector2.Zero);
+        var target = _origin + new Vector2(6.5f * Mathf.Sin(0.35f * _time), 3.2f * Mathf.Sin(0.7f * _time + 1f));
         var move = ((target - _pos) * 0.8f).LimitLength(1);
         Actor best = null;
         foreach (var a in _enemies)
@@ -268,9 +276,11 @@ public partial class Main : Node3D
         float dt = (float)delta;
         _time += dt;
         var (move, aim) = ReadInput();
+        bool scripted = RoomsActive && _phase == Phase.Transition;
+        if (scripted) { move = _scriptDir; aim = Vector2.Zero; }   // walk-out script: no control, no fire
 
         _pos += move * Tuning.PlayerSpeed * dt;
-        _pos = Clamp(_pos, Tuning.PlayerRadius);
+        if (!scripted) _pos = Clamp(_pos, Tuning.PlayerRadius);
         if (move.Length() > 0.1f) _legs.Rotation = new Vector3(0, Yaw(move), 0);
         if (aim.Length() > 0.3f) _torso.Rotation = new Vector3(0, Yaw(aim), 0);
         else if (move.Length() > 0.1f) _torso.Rotation = _legs.Rotation;
@@ -283,7 +293,8 @@ public partial class Main : Node3D
             AddShot(_pos + dir * 0.6f, dir * Tuning.BulletSpeed, hostile: false);
         }
 
-        Spawn(dt);
+        if (RoomsActive) UpdateRooms(dt);
+        if (!RoomsActive || (_phase == Phase.Fighting && _spawnDelay <= 0)) Spawn(dt);
         UpdateEnemies(dt);
         UpdateShots(dt);
         UpdateFx(dt);
@@ -291,7 +302,7 @@ public partial class Main : Node3D
         _hitCooldown -= dt;
         _hitRing.Visible = _hitCooldown > 0.4f;
         _player.Position = new Vector3(_pos.X, 0, _pos.Y);
-        _status.Text = $"enemies {_enemies.Count}   kills {_kills}   hits taken {_hits}";
+        _status.Text = (RoomsActive ? RoomStatus() + "      " : "") + $"enemies {_enemies.Count}   kills {_kills}   hits taken {_hits}";
     }
 
     /// <summary>
@@ -353,7 +364,7 @@ public partial class Main : Node3D
         {
             Kind = kind,
             Inward = -n,
-            Pos = n * (edge + 1.2f + back) + tangent * sideways,
+            Pos = _origin + n * (edge + 1.2f + back) + tangent * sideways,
             Entering = (2.2f + back) / Tuning.PlayerSpeed,
         };
         a.Radius = kind switch { Kind.Grunt => Tuning.GruntRadius, Kind.Fat => Tuning.FatRadius, _ => Tuning.TankRadius };
@@ -458,7 +469,7 @@ public partial class Main : Node3D
             var s = _shots[i];
             s.Pos += s.Vel * dt;
             s.Node.Position = new Vector3(s.Pos.X, 0, s.Pos.Y);
-            bool gone = Mathf.Abs(s.Pos.X) > W / 2 || Mathf.Abs(s.Pos.Y) > D / 2;
+            bool gone = Mathf.Abs(s.Pos.X - _origin.X) > W / 2 || Mathf.Abs(s.Pos.Y - _origin.Y) > D / 2;
             if (!gone && s.Hostile && _hitCooldown <= 0 && s.Pos.DistanceTo(_pos) < Tuning.PlayerRadius + 0.18f)
             {
                 PlayerHit(); gone = true;
@@ -480,7 +491,7 @@ public partial class Main : Node3D
         }
     }
 
-    void Kill(int index)
+    void Kill(int index, bool scored = true)
     {
         var a = _enemies[index];
         var (holder, tilt, _) = MakeHolder(0);
@@ -490,7 +501,7 @@ public partial class Main : Node3D
         _fx.Add(new Fx { Node = holder, Tilt = tilt, Mat = mat });
         a.Node.QueueFree();
         _enemies.RemoveAt(index);
-        _kills++;
+        if (scored) { _kills++; _roomKills++; }
     }
 
     void UpdateFx(float dt)
@@ -509,8 +520,9 @@ public partial class Main : Node3D
 
     // ---------------------------------------------------------------- helpers
 
-    static Vector2 Clamp(Vector2 p, float r) =>
-        new(Mathf.Clamp(p.X, -W / 2 + r, W / 2 - r), Mathf.Clamp(p.Y, -D / 2 + r, D / 2 - r));
+    Vector2 Clamp(Vector2 p, float r) =>
+        new(Mathf.Clamp(p.X, _origin.X - W / 2 + r, _origin.X + W / 2 - r),
+            Mathf.Clamp(p.Y, _origin.Y - D / 2 + r, _origin.Y + D / 2 - r));
 
     /// <summary>Yaw that turns a -Z-facing model toward a floor direction (x, z).</summary>
     static float Yaw(Vector2 d) => Mathf.Atan2(-d.X, -d.Y);
@@ -587,12 +599,12 @@ public partial class Main : Node3D
             Uv1Scale = new Vector3(W, D, 1),
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmapsAnisotropic,
         };
+        if (mode == BackdropMode.Walls) { BuildRoomFloors(floorMat); return; }   // walls come from the paintings
         Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W, D) }, floorMat, Vector3.Zero);
         // A circle on the floor: it turns into an ellipse wherever the floor is foreshortened.
         var ring = Shapes.Add(_arena, new TorusMesh { InnerRadius = 2.6f, OuterRadius = 3.0f },
             Shapes.Mat(new Color(0.6f, 0.12f, 0.1f)), new Vector3(0, 0.01f, 0));
         ring.Scale = new Vector3(1, 0.05f, 1);
-        if (mode == BackdropMode.Walls) return;   // walls come from the painting
 
         Shapes.Add(_arena, new PlaneMesh { Size = new Vector2(W + 16, D + 16) },
             Shapes.Mat(new Color(0.1f, 0.09f, 0.08f)), new Vector3(0, -0.02f, 0));

@@ -22,6 +22,7 @@ Open `project.godot` in Godot 4.7 (.NET build) and press Play, or:
 | F | show collision footprints (the circle gameplay actually uses) |
 | R | clear enemies |
 | H | hide help |
+| K | clear the room (preset 9 room loop) |
 
 ## Presets
 
@@ -48,7 +49,7 @@ Speeds and counts come from `docs/gameplay-reference.md`, converted at 1 m = 17 
 ## Unattended renders
 
 Launch options after `--`: `--preset=N`, `--autopilot`, `--feet`, `--pitch-offset=DEG`,
-`--save-backdrops=DIR`. `--autopilot --preset=N` makes the player fly a fixed figure-eight and shoot the nearest enemy
+`--save-backdrops=DIR`, `--quota=N` (kills to clear a room in preset 9). `--autopilot --preset=N` makes the player fly a fixed figure-eight and shoot the nearest enemy
 with a fixed random seed, so clips of different presets show the same fight:
 
 ```bash
@@ -100,6 +101,27 @@ exact rectangle on screen, so characters stand on the painted floor with no fitt
 - **Templates:** `docs/backdrops/backdrop-{walls,room,front}.png` are the paintings at 64 px/m, with
   the floor transparent in `walls`. An artist can paint over them at the same size and drop them in.
   Regenerate with `-- --save-backdrops=/abs/dir`.
+
+## Room to room (preset 9)
+
+Preset 9 is a loop of four rooms on a grid, using every exit direction once:
+A east → B, B south → C, C west → D, D north → A. Clear a room (a kill quota, or K), then walk into
+the open exit (green chevrons). The transition follows the arcade:
+
+- **Scroll:** constant 3 px/frame, no easing (`SCRLXSPD`, `WAVES.ASM:175`) → 9.65 m/s. Rooms sit
+  472 × 333 px apart (`CRCT1YX`) → 27.8 × 19.6 m, so 2.9 s sideways, 2.0 s vertically.
+- **Walk-out script:** the player keeps walking in the exit direction with no control for 223
+  frames sideways, 163 down, 170 up (`ROBOATT.ASM:2222-2296`). The walk outlasts the scroll by about
+  a second and leaves the player near the new room's centre.
+- **Freeze:** enemies start 120 frames after control returns (`ROBO.ASM:1295`).
+
+Each room's floor and painting are tinted so the change reads. A corridor floor fills only the gap
+between paintings; inside a painting the doorway is painted, and 3D floor there would cover the art.
+Paintings pan cleanly because the camera is orthographic and they face it, so there is no parallax.
+
+`docs/transition-sideways.png` and `docs/transition-down.png` are contact sheets (0.4 s apart) of
+A → B and B → C; `docs/rooms.mp4` is 45 s of the full loop on autopilot (`--quota=8`). The log
+prints `ROOMS` lines with timings, e.g. entering B at (0.0, −0.3) m from its centre.
 
 ## Comparison
 
