@@ -16,7 +16,7 @@ Open `project.godot` in Godot 4.7 (.NET build) and press Play, or:
 |---|---|
 | WASD / left stick | move |
 | Arrow keys / right stick | shoot (twin-stick) |
-| 1–6 | camera preset |
+| 1–8 | camera preset |
 | Q / E | pitch −/+ 5° |
 | Z / X | FOV −/+ 5° (perspective presets) |
 | F | show collision footprints (the circle gameplay actually uses) |
@@ -33,6 +33,8 @@ Open `project.godot` in Godot 4.7 (.NET build) and press Play, or:
 | 4 | Orthographic 60°, world stretched 1/sin(60°) in depth | floor tiles and the floor circle stay square/round, as in the arcade's art |
 | 5 | Perspective 60°, 30° vertical FOV | long lens: near-orthographic with a slight depth cue |
 | 6 | Perspective 50°, 50° vertical FOV | wide lens: near side looms, far side shrinks |
+| 7 | Hybrid: preset 4 + leaned walls | back wall leaned 27°, side walls 27°, front wall a 0.5 m curb; characters upright under real light |
+| 8 | Literal: straight down + leaned walls + tipped characters | plan-view floor, back wall leaned 63°, characters tipped back 30°, blob shadows |
 
 Every preset re-fits the camera so the whole arena, walls included, fills the screen — a fixed
 single-screen view like the arcade. Shots travel at gun height while collision uses the floor
@@ -53,6 +55,22 @@ $G --path godot/camera-demo --write-movie /abs/path/p2.avi --fixed-fps 60 --quit
 
 macOS stops redrawing a covered window, so for renders add a gitignored `override.cfg` with
 `[display]` `window/size/always_on_top=true`. Never combine `--write-movie` with `--headless`.
+
+## Matching the arcade's walls (presets 7 and 8)
+
+The arcade art draws each surface under its own rule: floor in plan, back wall face-on, side-wall
+faces as slanted strips, front wall as a lip, characters always in three-quarter view. No single
+camera does that, so the walls are leaned instead: each wall pivots on its floor boundary line, so
+collision never moves. Angles were fitted to an arcade frame: back-wall face ≈ 22% of the floor's
+on-screen depth, side-wall faces ≈ 6.7% of its width, front lip ≈ 0.55 m.
+
+- **7 (recommended):** the 60° orthographic camera with depth stretch keeps characters upright under
+  real lighting; only the walls are faked.
+- **8:** a plan-view camera needs the characters tipped back 30° to show their fronts, which breaks
+  real shadows, so it uses blob shadows.
+
+`docs/leaned-walls.png` shows the same frame through 7 (left) and 8 (right). Room geometry lives
+in `Main.BuildArena`, the angles in the `Walls` records in `Main.Presets`.
 
 ## Comparison
 

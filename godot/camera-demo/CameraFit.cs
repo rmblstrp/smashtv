@@ -2,7 +2,14 @@ using Godot;
 
 namespace CameraDemo;
 
-public record CameraPreset(string Name, bool Ortho, float Pitch, float Fov, bool StretchFloor, string Note);
+/// <summary>
+/// Wall geometry. Leans are degrees from vertical, tops tipped AWAY from the room, pivoting on the
+/// floor boundary so collision is unchanged. Upright = (0, 0, full height).
+/// </summary>
+public record Walls(float NorthLean, float SideLean, float SouthHeight, float Thickness, float SouthThickness);
+
+public record CameraPreset(string Name, bool Ortho, float Pitch, float Fov, bool StretchFloor, string Note,
+                           Walls Walls = null, float ActorTilt = 0);
 
 /// <summary>
 /// Places a fixed camera so the whole arena (walls included) fills the screen, like the
